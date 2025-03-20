@@ -1,8 +1,13 @@
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '@/components/ui/use-toast';
 import { toast } from 'sonner';
 
+// API URL
+const API_URL = 'http://localhost:5000/api';
+
+// Types
 interface User {
   id: string;
   name: string;
@@ -18,93 +23,137 @@ interface AuthContextType {
   logout: () => void;
 }
 
+// Context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
-
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+// Provider
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
+  const { toast: uiToast } = useToast();
 
+  // Check if user is logged in on initial load
   useEffect(() => {
-    // Check if user is already logged in from localStorage
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
+    const checkAuthStatus = async () => {
       try {
-        setUser(JSON.parse(storedUser));
+        const token = localStorage.getItem('token');
+        
+        if (!token) {
+          setIsLoading(false);
+          return;
+        }
+        
+        // Verify token and get user profile
+        const response = await fetch(`${API_URL}/auth/profile`, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+        
+        if (response.ok) {
+          const userData = await response.json();
+          setUser(userData);
+        } else {
+          // Token invalid - clear storage
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
       } catch (error) {
-        console.error('Error parsing stored user:', error);
-        localStorage.removeItem('user');
+        console.error('Auth check error:', error);
+      } finally {
+        setIsLoading(false);
       }
-    }
-    setIsLoading(false);
+    };
+
+    checkAuthStatus();
   }, []);
 
-  // In a real app, these functions would make API calls to your backend
+  // Login function
   const login = async (email: string, password: string) => {
     setIsLoading(true);
+    
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email, password })
+      });
       
-      // Example validation (replace with actual API call)
-      if (email === 'demo@example.com' && password === 'password') {
-        const userData = {
-          id: '1',
-          name: 'Demo User',
-          email: 'demo@example.com'
-        };
-        setUser(userData);
-        localStorage.setItem('user', JSON.stringify(userData));
-        navigate('/dashboard');
-        toast.success('Welcome back!');
-      } else {
-        toast.error('Invalid email or password');
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.message || 'Login failed');
       }
+      
+      // Save token and user data
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      
+      setUser(data.user);
+      toast.success('Logged in successfully');
+      navigate('/dashboard');
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred during login';
+      uiToast({
+        variant: "destructive",
+        title: "Login Failed",
+        description: message,
+      });
       console.error('Login error:', error);
-      toast.error('An error occurred during login');
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Signup function
   const signup = async (name: string, email: string, password: string) => {
     setIsLoading(true);
+    
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const response = await fetch(`${API_URL}/auth/signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name, email, password })
+      });
       
-      // Example (replace with actual API call)
-      const userData = {
-        id: Date.now().toString(),
-        name,
-        email
-      };
-      setUser(userData);
-      localStorage.setItem('user', JSON.stringify(userData));
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.message || 'Signup failed');
+      }
+      
+      // Save token and user data
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      
+      setUser(data.user);
+      toast.success('Account created successfully');
       navigate('/dashboard');
-      toast.success('Account created successfully!');
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred during signup';
+      uiToast({
+        variant: "destructive",
+        title: "Signup Failed",
+        description: message,
+      });
       console.error('Signup error:', error);
-      toast.error('An error occurred during signup');
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Logout function
   const logout = () => {
-    setUser(null);
+    localStorage.removeItem('token');
     localStorage.removeItem('user');
-    navigate('/login');
-    toast.success('You have been logged out');
+    setUser(null);
+    toast.info('Logged out successfully');
+    navigate('/');
   };
 
   return (
@@ -121,4 +170,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       {children}
     </AuthContext.Provider>
   );
+};
+
+// Hook for easy context access
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };
